@@ -1,0 +1,11 @@
+{
+  "name": "Zsh",
+  "scopeName": "source.zsh",
+  "patterns": [
+    {
+      "name": "keyword.control.zsh",
+      "match": "\\b(repeat|foreach|end|always)\\b"
+    },
+    { "include": "source.shell" }
+  ]
+}

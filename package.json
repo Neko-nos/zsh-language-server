@@ -1,0 +1,114 @@
+{
+  "name": "zsh-language-server",
+  "displayName": "Zsh Language Server",
+  "description": "Zsh syntax highlighting, diagnostics, completion, hover, navigation, and rename.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "Neko-nos",
+  "license": "MIT",
+  "icon": "icons/zsh.png",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onLanguage:shellscript"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "zsh",
+        "aliases": [
+          "Zsh",
+          "zsh"
+        ],
+        "extensions": [
+          ".zsh"
+        ],
+        "filenames": [
+          ".zshrc",
+          ".zshenv",
+          ".zprofile",
+          ".zlogin",
+          ".zlogout",
+          "zshrc",
+          "zshenv",
+          "zprofile",
+          "zlogin",
+          "zlogout"
+        ],
+        "firstLine": "^#!\\s*(?:\\S*\\/)?(?:zsh|env\\s+(?:-S\\s+)?zsh)(?:\\s|$)",
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/zsh.svg",
+          "dark": "./icons/zsh.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zsh",
+        "scopeName": "source.zsh",
+        "path": "./syntaxes/zsh.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "zsh.restartServer",
+        "title": "Zsh: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Zsh",
+      "properties": {
+        "zsh.assumeZsh": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Treat .sh files with no shebang or leading ShellCheck comment as Zsh. Disable in workspace or folder settings to leave them in Shell Script mode."
+        },
+        "zsh.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace communication with the Zsh language server in the Output panel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc && biome check --error-on-warnings .",
+    "format": "biome check --write .",
+    "test": "go test -race ./... && node --test test/protocol.test.mjs",
+    "audit:repo": "node scripts/audit-repo.mjs",
+    "test:vscode": "node scripts/test-vscode.mjs",
+    "package": "node scripts/build.mjs --all && vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "26.6.4",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vscode-jsonrpc": "9.0.3"
+  }
+}

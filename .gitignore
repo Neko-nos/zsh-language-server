@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/node_modules/
+/.npm-cache/
+/.vscode-test/
+/*.vsix
+*.log
