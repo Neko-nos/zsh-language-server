@@ -151,25 +151,27 @@ func (d *Document) index() {
 			skipped++
 		}
 		pathStack = append(pathStack, paths)
+		var parent syntax.Node
+		if len(stack) > 0 {
+			parent = stack[len(stack)-1]
+		}
 		fork := false
-		switch n.(type) {
+		switch node := n.(type) {
 		case *syntax.FuncDecl, *syntax.Subshell, *syntax.CmdSubst,
 			*syntax.ForClause, *syntax.WhileClause, *syntax.CaseClause, *syntax.CaseItem, *syntax.BinaryCmd:
 			fork = true
 		case *syntax.IfClause:
-			fork = paths.guardedDirectory(n.(*syntax.IfClause)) == ""
+			fork = paths.guardedDirectory(node) == ""
 		}
 		if fork {
 			base := paths
-			if len(stack) > 0 {
-				switch parent := stack[len(stack)-1].(type) {
-				case *syntax.IfClause:
-					if parent.Else == n {
-						base = pathStack[len(stack)-1]
-					}
-				case *syntax.CaseClause:
+			switch parent := parent.(type) {
+			case *syntax.IfClause:
+				if parent.Else == n {
 					base = pathStack[len(stack)-1]
 				}
+			case *syntax.CaseClause:
+				base = pathStack[len(stack)-1]
 			}
 			paths = &pathValues{filename: base.filename, values: maps.Clone(base.values), locals: maps.Clone(base.locals), fpathSet: base.fpathSet}
 			if _, function := n.(*syntax.FuncDecl); function {
@@ -200,20 +202,18 @@ func (d *Document) index() {
 				add(name, "function", true, false, node)
 			}
 		case *syntax.Assign:
-			paths.assign(node, stack)
+			paths.assign(node, stack, scope != 0)
 			local, declaration, associative := false, true, false
 			kind := "variable"
-			if len(stack) > 0 {
-				if decl, ok := stack[len(stack)-1].(*syntax.DeclClause); ok {
-					options := declarationOptions(decl)
-					declaration = !node.Naked || !strings.ContainsAny(options, "pf")
-					if strings.Contains(options, "f") {
-						kind = "function"
-					}
-					associative = strings.Contains(options, "A")
-					local = scope != 0 && (decl.Variant.Value == "local" || decl.Variant.Value == "typeset" || decl.Variant.Value == "declare")
-					local = local && declaration && !strings.Contains(options, "g")
+			if decl, ok := parent.(*syntax.DeclClause); ok {
+				options := declarationOptions(decl)
+				declaration = !node.Naked || !strings.ContainsAny(options, "pf")
+				if strings.Contains(options, "f") {
+					kind = "function"
 				}
+				associative = strings.Contains(options, "A")
+				local = scope != 0 && (decl.Variant.Value == "local" || decl.Variant.Value == "typeset" || decl.Variant.Value == "declare")
+				local = local && declaration && !strings.Contains(options, "g")
 			}
 			add(node.Name, kind, declaration, local, node)
 			if node.Name != nil && associative {
@@ -228,11 +228,11 @@ func (d *Document) index() {
 		case *syntax.ParamExp:
 			add(node.Param, "variable", false, false, node)
 		case *syntax.CallExpr:
-			referenceCall := functionCall(node)
-			command := ""
-			if len(referenceCall.Args) > 0 {
-				command, _ = literalWord(referenceCall.Args[0])
+			if len(node.Args) == 0 {
+				break
 			}
+			referenceArgs := functionArgs(node)
+			command, _ := literalWord(referenceArgs[0])
 			addWord := func(word *syntax.Word, name, kind string) {
 				if name == "" {
 					return
@@ -250,7 +250,7 @@ func (d *Document) index() {
 					d.occurrences[len(d.occurrences)-1].fpath = append([]string{}, paths.values["fpath"]...)
 				}
 			}
-			for _, word := range functionWords(referenceCall) {
+			for _, word := range functionWords(referenceArgs) {
 				path, literal := literalWord(word)
 				name := path
 				if command == "autoload" {
@@ -278,73 +278,67 @@ func (d *Document) index() {
 				}
 				addWord(word, name, "function")
 				if command == "zle" && name != "" {
-					args, _, _ := commandArgs(referenceCall, "N")
+					args, _, _ := commandArgs(referenceArgs, "N")
 					d.occurrences[len(d.occurrences)-1].implicitWidget = len(args) == 1
 				}
 			}
-			if len(node.Args) > 0 {
-				word := node.Args[0]
+			word := node.Args[0]
+			name, _ := literalWord(word)
+			addWord(word, name, "function")
+			words, kind := prefixedWords(node)
+			for _, word := range words {
 				name, _ := literalWord(word)
-				addWord(word, name, "function")
-				words, kind := prefixedWords(node)
-				for _, word := range words {
-					name, _ := literalWord(word)
-					addWord(word, name, kind)
-				}
-				if name == "unset" {
-					if args, options, ok := commandArgs(node, "fv"); ok && !strings.Contains(options, "f") {
-						for _, arg := range args {
-							name, _ := literalWord(arg)
-							if identifier.MatchString(name) {
-								addWord(arg, name, "variable")
-								paths.set(name, []string{})
-							}
-						}
-					}
-				}
-				if name == "read" {
-					for _, arg := range node.Args[1:] {
-						if name := arg.Lit(); identifier.MatchString(name) {
-							paths.set(name, nil)
-						}
-					}
-				}
-				d.indexSource(node, stack, paths)
+				addWord(word, name, kind)
 			}
+			if name == "unset" {
+				if args, options, ok := commandArgs(node.Args, "fv"); ok && !strings.Contains(options, "f") {
+					for _, arg := range args {
+						name, _ := literalWord(arg)
+						if identifier.MatchString(name) {
+							addWord(arg, name, "variable")
+							paths.set(name, []string{})
+						}
+					}
+				}
+			}
+			if name == "read" {
+				for _, arg := range node.Args[1:] {
+					if name := arg.Lit(); identifier.MatchString(name) {
+						paths.set(name, nil)
+					}
+				}
+			}
+			d.indexSource(node, stack, paths)
 		case *syntax.DeclClause:
 			add(node.Variant, "function", false, false, node.Variant)
 		case *syntax.Word:
 			// Bare names in arithmetic expressions are parameter references.
-			if len(stack) > 0 {
-				arithmetic := false
-				array := ""
-				switch parent := stack[len(stack)-1].(type) {
-				case *syntax.ArithmCmd, *syntax.ArithmExp, *syntax.BinaryArithm, *syntax.UnaryArithm, *syntax.ParenArithm, *syntax.CStyleLoop, *syntax.LetClause:
-					arithmetic = true
-				case *syntax.ParamExp:
-					if parent.Param != nil && parent.Index == node {
-						array = parent.Param.Value
-					}
-				case *syntax.Assign:
-					if parent.Name != nil && parent.Index == node {
-						array = parent.Name.Value
+			arithmetic := false
+			array := ""
+			switch parent := parent.(type) {
+			case *syntax.ArithmCmd, *syntax.ArithmExp, *syntax.BinaryArithm, *syntax.UnaryArithm, *syntax.ParenArithm, *syntax.CStyleLoop, *syntax.LetClause:
+				arithmetic = true
+			case *syntax.ParamExp:
+				if parent.Param != nil && parent.Index == node {
+					array = parent.Param.Value
+				}
+			case *syntax.Assign:
+				if parent.Name != nil && parent.Index == node {
+					array = parent.Name.Value
+				}
+			}
+			if array != "" {
+				declarations := d.matching(occurrence{name: array, kind: "variable", scope: scope}, true)
+				arithmetic = len(declarations) > 0
+				for _, declaration := range declarations {
+					if declaration.associative {
+						arithmetic = false
 					}
 				}
-				if array != "" {
-					declarations := d.matching(occurrence{name: array, kind: "variable", scope: scope}, true)
-					arithmetic = len(declarations) > 0
-					for _, declaration := range declarations {
-						if declaration.associative {
-							arithmetic = false
-						}
-					}
-				}
-				if arithmetic {
-					if len(node.Parts) == 1 {
-						if lit, ok := node.Parts[0].(*syntax.Lit); ok && identifier.MatchString(lit.Value) {
-							add(lit, "variable", false, false, node)
-						}
-					}
+			}
+			if arithmetic && len(node.Parts) == 1 {
+				if lit, ok := node.Parts[0].(*syntax.Lit); ok && identifier.MatchString(lit.Value) {
+					add(lit, "variable", false, false, node)
 				}
 			}
 		}
@@ -361,27 +355,22 @@ func (d *Document) index() {
 	d.fpath = paths.values["fpath"]
 }
 
-func functionCall(call *syntax.CallExpr) *syntax.CallExpr {
+func functionArgs(call *syntax.CallExpr) []*syntax.Word {
 	if len(call.Args) > 1 {
 		command, _ := literalWord(call.Args[0])
 		if command == "builtin" {
 			builtin, _ := literalWord(call.Args[1])
 			switch builtin {
 			case "autoload", "unset", "unfunction", "zle":
-				unwrapped := *call
-				unwrapped.Args = call.Args[1:]
-				return &unwrapped
+				return call.Args[1:]
 			}
 		}
 	}
-	return call
+	return call.Args
 }
 
-func functionWords(call *syntax.CallExpr) []*syntax.Word {
-	if len(call.Args) == 0 {
-		return nil
-	}
-	command, _ := literalWord(call.Args[0])
+func functionWords(words []*syntax.Word) []*syntax.Word {
+	command, _ := literalWord(words[0])
 	allowed := ""
 	switch command {
 	case "autoload":
@@ -398,23 +387,23 @@ func functionWords(call *syntax.CallExpr) []*syntax.Word {
 	default:
 		return nil
 	}
-	args, options, ok := commandArgs(call, allowed)
+	args, options, ok := commandArgs(words, allowed)
 	if !ok {
 		return nil
 	}
-	if command == "unset" && !strings.Contains(options, "f") {
-		return nil
-	}
-	if command == "compdef" {
+	switch command {
+	case "unset":
+		if !strings.Contains(options, "f") {
+			return nil
+		}
+	case "compdef":
 		return args[:min(1, len(args))]
-	}
-	if command == "add-zsh-hook" {
+	case "add-zsh-hook":
 		if len(args) == 2 {
 			return args[1:]
 		}
 		return nil
-	}
-	if command == "zle" {
+	case "zle":
 		if options == "N" && len(args) >= 1 && len(args) <= 2 {
 			return args[len(args)-1:]
 		}
@@ -423,8 +412,8 @@ func functionWords(call *syntax.CallExpr) []*syntax.Word {
 	return args
 }
 
-func commandArgs(call *syntax.CallExpr, allowed string) ([]*syntax.Word, string, bool) {
-	args := call.Args[1:]
+func commandArgs(words []*syntax.Word, allowed string) ([]*syntax.Word, string, bool) {
+	args := words[1:]
 	options := ""
 	for len(args) > 0 {
 		option, _ := literalWord(args[0])
@@ -589,7 +578,7 @@ func (d *Document) completionContext(offset int, parameter bool) (int, bool) {
 		case *syntax.CallExpr:
 			if !parameter && len(node.Args) > 0 {
 				allowed = false
-				words := append([]*syntax.Word{node.Args[0]}, functionWords(functionCall(node))...)
+				words := append([]*syntax.Word{node.Args[0]}, functionWords(functionArgs(node))...)
 				if prefixed, kind := prefixedWords(node); kind == "function" {
 					words = append(words, prefixed...)
 				}

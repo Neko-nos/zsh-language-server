@@ -34,26 +34,13 @@ func newPathValues(uri string) *pathValues {
 	}}
 }
 
-func (p *pathValues) assign(node *syntax.Assign, stack []syntax.Node) {
+func (p *pathValues) assign(node *syntax.Assign, stack []syntax.Node, inFunction bool) {
 	if node.Name == nil {
 		return
 	}
 	name := node.Name.Value
 	if name == "FPATH" {
 		name = "fpath"
-	}
-	inFunction := false
-	for _, parent := range stack {
-		if _, ok := parent.(*syntax.FuncDecl); ok {
-			inFunction = true
-		}
-	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		switch stack[i].(type) {
-		case *syntax.FuncDecl, *syntax.Subshell, *syntax.CmdSubst:
-			stack = stack[i+1:]
-			i = 0
-		}
 	}
 	if decl, ok := stack[len(stack)-1].(*syntax.DeclClause); ok && (decl.Variant.Value == "local" || decl.Variant.Value == "typeset" || decl.Variant.Value == "declare") && !strings.ContainsAny(declarationOptions(decl), "gpf") {
 		if node.Naked {
@@ -68,8 +55,11 @@ func (p *pathValues) assign(node *syntax.Assign, stack []syntax.Node) {
 	if node.Naked {
 		return
 	}
-	for _, parent := range stack {
-		switch parent := parent.(type) {
+ancestors:
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch parent := stack[i].(type) {
+		case *syntax.FuncDecl, *syntax.Subshell, *syntax.CmdSubst:
+			break ancestors
 		case *syntax.CallExpr:
 			if len(parent.Args) > 0 {
 				return
