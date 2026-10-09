@@ -32,7 +32,10 @@ export async function runWorkflowTests(directory: string) {
       new vscode.Position(1, 4),
     );
     assert.equal(result?.length, 1);
-    assert.equal(result[0].uri.fsPath, await fs.realpath(uri.fsPath));
+    assert.equal(
+      await fs.realpath(result[0].uri.fsPath),
+      await fs.realpath(uri.fsPath),
+    );
     assert.equal(result[0].range.start.line, line);
   }
   await checkDefinition(helper, 1);

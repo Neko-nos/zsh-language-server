@@ -528,7 +528,10 @@ export async function runEditorTests(directory: string) {
     async (document) => {
       const result = await definitions(document, "paint_tile");
       assert.equal(result.length, 1);
-      assert.equal(result[0].uri.fsPath, path.join(firstPath, "paint_tile"));
+      assert.equal(
+        result[0].uri.fsPath,
+        await fs.realpath(path.join(firstPath, "paint_tile")),
+      );
       assert.equal(result[0].range.start.line, 1);
       const hover = await vscode.commands.executeCommand<vscode.Hover[]>(
         "vscode.executeHoverProvider",

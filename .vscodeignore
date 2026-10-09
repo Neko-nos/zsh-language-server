@@ -1,7 +1,6 @@
 .git/**
 .vscode-test/**
 node_modules/**
-.npm-cache/**
 internal/**
 cmd/**
 client/**
@@ -10,7 +9,6 @@ test/**
 go.*
 tsconfig.json
 biome.json
-.npmrc
 .gitignore
 package-lock.json
 dist/test.cjs

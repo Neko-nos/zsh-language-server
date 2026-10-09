@@ -50,7 +50,7 @@ func prefixedWords(call *syntax.CallExpr) ([]*syntax.Word, string) {
 			if name == "command" {
 				allowed, kind = "pvV", "external"
 			}
-			words, options, ok := commandArgs(&syntax.CallExpr{Args: args}, allowed)
+			words, options, ok := commandArgs(args, allowed)
 			if !ok {
 				return nil, ""
 			}
