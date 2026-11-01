@@ -14,12 +14,15 @@ type Server struct {
 	output      io.Writer
 	documents   map[string]*Document
 	builtins    map[string]string
+	manuals     map[string]map[string]string
 	roots       []string
 	initialized bool
 	shutdown    bool
 }
 
-func NewServer() *Server { return &Server{documents: map[string]*Document{}, builtins: builtins()} }
+func NewServer() *Server {
+	return &Server{documents: map[string]*Document{}, builtins: builtins(), manuals: map[string]map[string]string{}}
+}
 
 func (s *Server) handle(request request) (any, *rpcError) {
 	if request.Method == "initialize" {

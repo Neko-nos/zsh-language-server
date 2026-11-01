@@ -72,18 +72,22 @@ func commandDocumentation(name string) string {
 	if _, err := exec.LookPath(name); err != nil {
 		return ""
 	}
+	text := manualText(filepath.Base(name))
+	if text == "" {
+		return ""
+	}
+	return "```text\n" + text + "\n```"
+}
+
+func manualText(name string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	// Read the installed manual without running the command or an interactive pager.
-	cmd := exec.CommandContext(ctx, "man", "-P", "cat", "--", filepath.Base(name))
+	cmd := exec.CommandContext(ctx, "man", "-P", "cat", "--", name)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "MANWIDTH=80", "MAN_KEEP_FORMATTING=")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	text := strings.TrimSpace(manFormatting.ReplaceAllString(string(output), ""))
-	if text == "" {
-		return ""
-	}
-	return "```text\n" + text + "\n```"
+	return strings.TrimSpace(manFormatting.ReplaceAllString(string(output), ""))
 }

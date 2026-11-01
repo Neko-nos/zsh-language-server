@@ -413,22 +413,13 @@ func functionWords(words []*syntax.Word) []*syntax.Word {
 }
 
 func commandArgs(words []*syntax.Word, allowed string) ([]*syntax.Word, string, bool) {
-	args := words[1:]
+	args, flags := shellArguments(words[1:], "-", "")
 	options := ""
-	for len(args) > 0 {
-		option, _ := literalWord(args[0])
-		if !strings.HasPrefix(option, "-") {
-			break
-		}
-		args = args[1:]
-		if option == "--" {
-			break
-		}
-		option = strings.TrimPrefix(option, "-")
-		if strings.Trim(option, allowed) != "" {
+	for _, flag := range flags {
+		if strings.Trim(flag.names, allowed) != "" {
 			return nil, "", false
 		}
-		options += option
+		options += flag.names
 	}
 	return args, options, true
 }

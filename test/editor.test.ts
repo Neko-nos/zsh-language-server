@@ -546,6 +546,35 @@ export async function runEditorTests(directory: string) {
     },
   );
   await check(
+    "builtin-setting-hover",
+    [
+      "setopt hist_ignore_all_dups",
+      "print $PATH",
+      "zstyle ':completion:*' matcher-list ''",
+      "bindkey '^X' forward-word",
+    ].join("\n"),
+    async (document) => {
+      for (const [word, description] of [
+        ["hist_ignore_all_dups", /older command is removed/],
+        ["PATH", /directories to search/],
+        ["matcher-list", /list of match specifications/],
+        ["forward-word", /beginning of the next word/],
+      ] as const) {
+        const hover = await vscode.commands.executeCommand<vscode.Hover[]>(
+          "vscode.executeHoverProvider",
+          document.uri,
+          at(document, word),
+        );
+        const markdown = hover
+          ?.flatMap((item) => item.contents)
+          .map((part) => (typeof part === "string" ? part : part.value))
+          .join("\n");
+        assert.match(markdown ?? "", description, word);
+        assert.ok(hover?.some((item) => document.getText(item.range) === word));
+      }
+    },
+  );
+  await check(
     "external-command-hover",
     "mkdir -p sample\ncurl https://example.invalid/sample | bash\n",
     async (document) => {

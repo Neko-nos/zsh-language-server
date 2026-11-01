@@ -185,7 +185,7 @@ func (s *Server) definitions(d *Document, pos Position) []Location {
 func (s *Server) hover(d *Document, pos Position) *Hover {
 	o := d.at(pos)
 	if o == nil {
-		return nil
+		return s.argumentHover(d, pos)
 	}
 	value := ""
 	if defs := s.declarations(d, *o); len(defs) > 0 {
@@ -212,8 +212,23 @@ func (s *Server) hover(d *Document, pos Position) *Hover {
 	} else if o.kind == "function" || o.kind == "builtin" || o.kind == "external" {
 		if help, ok := s.builtins[o.name]; ok && o.kind != "external" {
 			value = builtinDocumentation(help).Value
-		} else if o.kind != "builtin" {
+		} else if o.kind != "external" {
+			value = s.builtinHelp(o.name)
+		}
+		if value == "" && o.kind != "builtin" {
 			value = commandDocumentation(o.name)
+		}
+	}
+	if o.kind == "variable" {
+		help := s.shellDocumentation("zshparam", o.name)
+		if help == "" {
+			help = s.shellDocumentation("zshzle", "parameter:"+o.name)
+		}
+		if help != "" {
+			if value != "" {
+				value += "\n\n"
+			}
+			value += help
 		}
 	}
 	if value == "" {
