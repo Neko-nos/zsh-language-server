@@ -61,7 +61,7 @@ async function main() {
     path.join(directory, "extensions"),
   ];
   for (const extension of [
-    path.resolve("zsh-language-server-0.1.0.vsix"),
+    path.resolve(`${manifest.name}.vsix`),
     "mads-hartmann.bash-ide-vscode@1.43.2",
   ])
     execFileSync(cli, [...launchArgs, "--install-extension", extension], {
