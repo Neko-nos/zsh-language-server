@@ -1,9 +1,13 @@
 package lsp
 
 import (
+	"context"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
@@ -29,8 +33,8 @@ func newPathValues(uri string) *pathValues {
 	return &pathValues{filename: filename, values: map[string][]string{
 		"HOME": {home}, "0": {filename},
 		"IFS": {" \t\n"},
-		// An unknown entry could take precedence over a match in a later directory.
-		"fpath": {""},
+		// A NUL cannot be a path; preserve the inherited search path through array edits.
+		"fpath": {"\x00"},
 	}}
 }
 
@@ -301,7 +305,15 @@ func (s *Server) autoloadDeclaration(d *Document, o occurrence) *declaration {
 		if fpath == nil {
 			fpath = d.fpath
 		}
+		var directories []string
 		for _, directory := range fpath {
+			if directory == "\x00" {
+				directories = append(directories, s.inheritedFunctionPaths()...)
+			} else {
+				directories = append(directories, directory)
+			}
+		}
+		for _, directory := range directories {
 			// Relative fpath entries depend on the shell's working directory.
 			if !filepath.IsAbs(directory) {
 				break
@@ -327,7 +339,7 @@ func (s *Server) siblingDeclaration(d *Document, o occurrence) *declaration {
 	if fpath == nil {
 		fpath = d.fpath
 	}
-	if len(fpath) != 1 || fpath[0] != "" {
+	if len(fpath) != 1 || fpath[0] != "\x00" {
 		return nil
 	}
 	target := d.autoloadPath(o)
@@ -349,6 +361,73 @@ func (s *Server) siblingDeclaration(d *Document, o occurrence) *declaration {
 		return nil
 	}
 	return functionFileDeclaration(doc, o.name, target == o.name)
+}
+
+func (s *Server) inheritedFunctionPaths() []string {
+	if s.functionPaths == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		// Disable startup files: only inspect the inherited and installed search path.
+		output, _ := exec.CommandContext(ctx, "zsh", "-dfc", `printf '%s\0' "${fpath[@]}"`).Output()
+		s.functionPaths = strings.Split(strings.TrimRight(string(output), "\x00"), "\x00")
+	}
+	return s.functionPaths
+}
+
+func (s *Server) workspaceAutoloadDeclaration(d *Document, o occurrence) *declaration {
+	if d.autoloadPath(o) != o.name {
+		return nil
+	}
+	fpath := o.fpath
+	if fpath == nil {
+		fpath = d.fpath
+	}
+	if len(fpath) != 1 || fpath[0] != "\x00" {
+		return nil
+	}
+	filename, err := filePath(d.URI)
+	if err != nil {
+		return nil
+	}
+	root := ""
+	for _, directory := range s.roots {
+		if relative, err := filepath.Rel(directory, filename); err == nil && filepath.IsLocal(relative) {
+			root = directory
+			break
+		}
+	}
+	if root == "" {
+		if _, err := os.Stat(filename); err != nil {
+			return nil
+		}
+		root = filepath.Dir(filename)
+	}
+	// A sourced script can inherit fpath from its caller. A unique matching
+	// autoload file supplies a target without evaluating that startup code.
+	var result *declaration
+	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Name() != o.name {
+			return nil
+		}
+		if doc := s.readDocument(fileURI(path)); doc != nil {
+			if result != nil {
+				result = nil
+				return filepath.SkipAll
+			}
+			result = functionFileDeclaration(doc, o.name, true)
+		}
+		return nil
+	})
+	return result
 }
 
 func functionFileDeclaration(doc *Document, name string, autoload bool) *declaration {

@@ -160,6 +160,9 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 		if def := s.siblingDeclaration(d, o); def != nil {
 			return []declaration{*def}
 		}
+		if def := s.workspaceAutoloadDeclaration(d, o); def != nil {
+			return []declaration{*def}
+		}
 	}
 	return result
 }
@@ -190,24 +193,33 @@ func (s *Server) hover(d *Document, pos Position) *Hover {
 	value := ""
 	if defs := s.declarations(d, *o); len(defs) > 0 {
 		def := defs[0]
-		lines := strings.Split(def.doc.Text, "\n")
-		line := def.whole.Start.Line
-		value = "```zsh\n" + strings.TrimSpace(lines[line]) + "\n```"
-		start := line
-		for start > 0 && strings.HasPrefix(strings.TrimSpace(lines[start-1]), "#") && !strings.HasPrefix(strings.TrimSpace(lines[start-1]), "#!") {
-			start--
+		if def.kind == "function" {
+			value = "```zsh\n" + def.name + "()\n```"
 		}
 		comments := []string{}
-		for _, comment := range lines[start:line] {
-			comment = strings.TrimSpace(comment)
-			if len(comment) > 1 && strings.Trim(comment, "#") == "" {
-				continue
-			}
-			comment = strings.TrimPrefix(strings.TrimPrefix(comment, "#"), " ")
-			comments = append(comments, comment)
+		if def.doc.tree != nil {
+			syntax.Walk(def.doc.tree, func(n syntax.Node) bool {
+				stmt, ok := n.(*syntax.Stmt)
+				if !ok || def.doc.Position(int(stmt.Pos().Offset())) != def.whole.Start {
+					return true
+				}
+				for _, comment := range stmt.Comments {
+					if comment.Pos().Offset() >= stmt.Pos().Offset() || strings.HasPrefix(comment.Text, "!") || comment.Text != "" && strings.Trim(comment.Text, "#") == "" {
+						continue
+					}
+					comments = append(comments, strings.TrimPrefix(comment.Text, " "))
+				}
+				return false
+			})
 		}
 		if len(comments) > 0 {
-			value += "\n\n" + commentMarkdown(comments)
+			if value != "" {
+				value += "\n\n"
+			}
+			value += commentMarkdown(comments)
+		} else if value == "" {
+			line := strings.Split(def.doc.Text, "\n")[def.whole.Start.Line]
+			value = "```zsh\n" + strings.TrimSpace(line) + "\n```"
 		}
 	} else if o.kind == "function" || o.kind == "builtin" || o.kind == "external" {
 		if help, ok := s.builtins[o.name]; ok && o.kind != "external" {

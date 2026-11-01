@@ -11,13 +11,14 @@ import (
 )
 
 type Server struct {
-	output      io.Writer
-	documents   map[string]*Document
-	builtins    map[string]string
-	manuals     map[string]map[string]string
-	roots       []string
-	initialized bool
-	shutdown    bool
+	output        io.Writer
+	documents     map[string]*Document
+	builtins      map[string]string
+	manuals       map[string]map[string]string
+	functionPaths []string
+	roots         []string
+	initialized   bool
+	shutdown      bool
 }
 
 func NewServer() *Server {
