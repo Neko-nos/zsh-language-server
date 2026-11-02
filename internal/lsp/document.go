@@ -24,16 +24,17 @@ var parameterPrefix = regexp.MustCompile(`\$\{(?:\([^)]*\))?[#^~=+]*[a-zA-Z_0-9]
 var zshErrorLine = regexp.MustCompile(`(?m)^.*?:([0-9]+): `)
 
 type occurrence struct {
-	name           string
-	kind           string
-	start, end     int
-	scope          int
-	declaration    bool
-	local          bool
-	associative    bool
-	implicitWidget bool
-	whole          Range
-	fpath          []string
+	name             string
+	kind             string
+	start, end       int
+	scope            int
+	declaration      bool
+	local            bool
+	associative      bool
+	implicitWidget   bool
+	functionArgument bool
+	whole            Range
+	fpath            []string
 }
 
 type autoload struct {
@@ -277,6 +278,9 @@ func (d *Document) index() {
 					}
 				}
 				addWord(word, name, "function")
+				if name != "" {
+					d.occurrences[len(d.occurrences)-1].functionArgument = true
+				}
 				if command == "zle" && name != "" {
 					args, _, _ := commandArgs(referenceArgs, "N")
 					d.occurrences[len(d.occurrences)-1].implicitWidget = len(args) == 1

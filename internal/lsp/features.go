@@ -144,6 +144,10 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 			if doc.binding(candidate) != binding {
 				continue
 			}
+			// Direct calls run before later declarations; function bodies run when called.
+			if doc == d && o.kind == "function" && !o.declaration && !o.functionArgument && o.scope == 0 && candidate.start > o.start {
+				continue
+			}
 			result = append(result, declaration{doc, candidate})
 		}
 	}
