@@ -22,9 +22,11 @@ load_sample() { source "$1"; }
 function source() { print -r -- wrapped-sample; }
 source "$1"
 load_sample "$1"
+unfunction source
+[[ -r "$1" ]] && source "$1"
 `
 	output, err := exec.Command("zsh", "-dfc", text, "zsh", library).CombinedOutput()
-	if err != nil || string(output) != "builtin-sample\nwrapped-sample\nwrapped-sample\n" {
+	if err != nil || string(output) != "builtin-sample\nwrapped-sample\nwrapped-sample\nbuiltin-sample\n" {
 		t.Fatalf("Zsh declaration order: %s (%v)", output, err)
 	}
 	d := doc(text)
@@ -38,6 +40,8 @@ load_sample "$1"
 		{Position{3, 18}, 5, "Load a sample through the wrapper."},
 		{Position{5, 11}, 5, "Load a sample through the wrapper."},
 		{Position{6, 2}, 5, "Load a sample through the wrapper."},
+		{Position{8, 13}, 5, "Load a sample through the wrapper."},
+		{Position{9, 18}, -1, "Read and execute a file in the current shell."},
 	} {
 		defs := s.definitions(d, test.position)
 		if test.line < 0 {
@@ -63,6 +67,77 @@ load_sample "$1"
 	d = doc("add-zsh-hook precmd paint_sample\npaint_sample() { :; }\n")
 	if defs := s.definitions(d, d.Position(strings.Index(d.Text, "paint_sample"))); len(defs) != 1 || defs[0].Range.Start.Line != 1 {
 		t.Fatalf("deferred callback definition: %+v", defs)
+	}
+}
+
+func TestFunctionRemoval(t *testing.T) {
+	for _, test := range []struct {
+		text    string
+		builtin bool
+	}{
+		{"unfunction print\nprint -r -- sample", true},
+		{"builtin unfunction -- 'print'\nprint -r -- sample", true},
+		{"unset -f print\nprint -r -- sample", true},
+		{"builtin unset -f -- print\nprint -r -- sample", true},
+		{"noglob unset -f print\nprint -r -- sample", true},
+		{"{ unfunction print; }\nprint -r -- sample", true},
+		{"if true; then unfunction print; print -r -- sample; fi", true},
+		{"if false; then unfunction print; else print -r -- sample; fi", false},
+		{"cleanup_sample() { unfunction print; }\nprint -r -- sample", false},
+		{"(unfunction print)\nprint -r -- sample", false},
+		{"unset -v print\nprint -r -- sample", false},
+		{"unfunction print\n# Print through a sample wrapper.\nprint() { builtin print -r -- wrapped; }\nprint -r -- sample", false},
+	} {
+		t.Run(test.text, func(t *testing.T) {
+			text := "# Print through a sample wrapper.\nprint() { builtin print -r -- wrapped; }\n" + test.text + "\n"
+			output, err := exec.Command("zsh", "-dfc", text).CombinedOutput()
+			want, description := "wrapped\n", "Print through a sample wrapper."
+			if test.builtin {
+				want, description = "sample\n", "Write arguments."
+			}
+			if err != nil || string(output) != want {
+				t.Fatalf("Zsh function removal: %s (%v)", output, err)
+			}
+			d := doc(text)
+			s := NewServer()
+			position := d.Position(strings.Index(text, "print -r -- sample"))
+			hover := s.hover(d, position)
+			if hover == nil || !strings.Contains(hover.Contents.Value, description) {
+				t.Fatalf("hover: %+v", hover)
+			}
+			defs := s.definitions(d, position)
+			if test.builtin {
+				if len(defs) != 0 {
+					t.Fatalf("builtin definition: %+v", defs)
+				}
+			} else if len(defs) != 1 || defs[0].Range.Start != d.Position(strings.LastIndex(text, "print()")) {
+				t.Fatalf("wrapper definition: %+v", defs)
+			}
+		})
+	}
+}
+
+func TestAutoloadAfterFunctionRemoval(t *testing.T) {
+	library := t.TempDir()
+	if err := os.WriteFile(filepath.Join(library, "print"), []byte("# Print an autoloaded sample.\nbuiltin print -r -- wrapped\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	text := "fpath=('" + library + "')\nautoload -Uz print\nprint sample\nunfunction print\nprint sample\nautoload -Uz print\nprint sample\n"
+	output, err := exec.Command("zsh", "-dfc", text).CombinedOutput()
+	if err != nil || string(output) != "wrapped\nsample\nwrapped\n" {
+		t.Fatalf("Zsh autoload after removal: %s (%v)", output, err)
+	}
+	d := doc(text)
+	s := NewServer()
+	for _, line := range []int{2, 4, 6} {
+		want := "Print an autoloaded sample."
+		if line == 4 {
+			want = "Write arguments."
+		}
+		hover := s.hover(d, Position{line, 2})
+		if hover == nil || !strings.Contains(hover.Contents.Value, want) {
+			t.Fatalf("hover at line %d: %+v", line, hover)
+		}
 	}
 }
 

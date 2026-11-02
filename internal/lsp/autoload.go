@@ -285,7 +285,7 @@ func (d *Document) autoloadPath(o occurrence) string {
 		entries := d.autoloads[o.name]
 		for i := len(entries) - 1; i >= 0; i-- {
 			entry := entries[i]
-			if entry.scope == scope && (entry.start <= o.start || scope == 0 && o.scope != 0) {
+			if entry.scope == scope && entry.start >= o.functionRemovedAt && (entry.start <= o.start || scope == 0 && o.scope != 0) {
 				return entry.path
 			}
 		}
@@ -343,6 +343,9 @@ func (s *Server) siblingDeclaration(d *Document, o occurrence) *declaration {
 		return nil
 	}
 	target := d.autoloadPath(o)
+	if target == "" && o.functionRemovedAt > 0 {
+		return nil
+	}
 	if target != "" && target != o.name {
 		return nil
 	}

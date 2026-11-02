@@ -134,7 +134,7 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 	binding := d.binding(o)
 	documents := s.related(d)
 	for _, doc := range documents {
-		if doc != d && binding != 0 {
+		if doc != d && (binding != 0 || o.kind == "function" && o.functionRemovedAt > 0) {
 			continue
 		}
 		for _, candidate := range doc.occurrences {
@@ -142,6 +142,9 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 				continue
 			}
 			if doc.binding(candidate) != binding {
+				continue
+			}
+			if o.kind == "function" && candidate.start < o.functionRemovedAt {
 				continue
 			}
 			// Direct calls run before later declarations; function bodies run when called.
@@ -153,6 +156,9 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 	}
 	if len(result) == 0 && o.kind == "function" {
 		for _, doc := range documents {
+			if doc != d && o.functionRemovedAt > 0 {
+				continue
+			}
 			context := o
 			if doc != d {
 				context.scope, context.start, context.fpath = 0, len(doc.Text), nil

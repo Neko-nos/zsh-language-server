@@ -24,17 +24,18 @@ var parameterPrefix = regexp.MustCompile(`\$\{(?:\([^)]*\))?[#^~=+]*[a-zA-Z_0-9]
 var zshErrorLine = regexp.MustCompile(`(?m)^.*?:([0-9]+): `)
 
 type occurrence struct {
-	name             string
-	kind             string
-	start, end       int
-	scope            int
-	declaration      bool
-	local            bool
-	associative      bool
-	implicitWidget   bool
-	functionArgument bool
-	whole            Range
-	fpath            []string
+	name              string
+	kind              string
+	start, end        int
+	scope             int
+	declaration       bool
+	local             bool
+	associative       bool
+	implicitWidget    bool
+	functionArgument  bool
+	functionRemovedAt int
+	whole             Range
+	fpath             []string
 }
 
 type autoload struct {
@@ -121,10 +122,12 @@ func (d *Document) nodeRange(n syntax.Node) Range {
 
 func (d *Document) index() {
 	paths := newPathValues(d.URI)
+	functionRemovals := map[string]int{}
 	d.autoloads = map[string][]autoload{}
 	skipped := 0
 	var stack []syntax.Node
 	var pathStack []*pathValues
+	var removalStack []map[string]int
 	syntax.Walk(d.tree, func(n syntax.Node) bool {
 		if n == nil {
 			previous := pathStack[len(pathStack)-1]
@@ -141,6 +144,8 @@ func (d *Document) index() {
 				}
 			}
 			paths = previous
+			functionRemovals = removalStack[len(removalStack)-1]
+			removalStack = removalStack[:len(removalStack)-1]
 			pathStack = pathStack[:len(pathStack)-1]
 			stack = stack[:len(stack)-1]
 			return true
@@ -152,9 +157,23 @@ func (d *Document) index() {
 			skipped++
 		}
 		pathStack = append(pathStack, paths)
+		removalStack = append(removalStack, functionRemovals)
 		var parent syntax.Node
 		if len(stack) > 0 {
 			parent = stack[len(stack)-1]
+		}
+		switch n.(type) {
+		case *syntax.FuncDecl:
+			// Function bodies execute later and may see definitions added by their caller.
+			functionRemovals = map[string]int{}
+		case *syntax.IfClause, *syntax.Subshell, *syntax.CmdSubst,
+			*syntax.ForClause, *syntax.WhileClause, *syntax.CaseClause, *syntax.CaseItem, *syntax.BinaryCmd:
+			base := functionRemovals
+			if clause, ok := parent.(*syntax.IfClause); ok && clause.Else == n {
+				base = removalStack[len(stack)-1]
+			}
+			// A removal in one branch or subshell does not establish removal outside it.
+			functionRemovals = maps.Clone(base)
 		}
 		fork := false
 		switch node := n.(type) {
@@ -194,6 +213,7 @@ func (d *Document) index() {
 			d.occurrences = append(d.occurrences, occurrence{
 				name: lit.Value, kind: kind, start: int(lit.Pos().Offset()), end: int(lit.End().Offset()),
 				scope: scope, declaration: declaration, local: local, whole: d.nodeRange(whole),
+				functionRemovedAt: functionRemovals[lit.Value],
 			})
 		}
 		switch node := n.(type) {
@@ -246,6 +266,7 @@ func (d *Document) index() {
 				}
 				d.occurrences = append(d.occurrences, occurrence{
 					name: name, kind: kind, start: start, end: end, scope: scope, whole: d.nodeRange(word),
+					functionRemovedAt: functionRemovals[name],
 				})
 				if scope == 0 || paths.fpathSet {
 					d.occurrences[len(d.occurrences)-1].fpath = append([]string{}, paths.values["fpath"]...)
@@ -293,6 +314,17 @@ func (d *Document) index() {
 			for _, word := range words {
 				name, _ := literalWord(word)
 				addWord(word, name, kind)
+			}
+			args := builtinArgs(node.Args)
+			if len(args) > 0 {
+				command, _ := literalWord(args[0])
+				if command == "unfunction" || command == "unset" {
+					for _, word := range functionWords(args) {
+						if name, literal := literalWord(word); literal {
+							functionRemovals[name] = int(node.End().Offset())
+						}
+					}
+				}
 			}
 			if name == "unset" {
 				if args, options, ok := commandArgs(node.Args, "fv"); ok && !strings.Contains(options, "f") {
