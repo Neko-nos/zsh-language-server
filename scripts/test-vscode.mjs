@@ -39,6 +39,7 @@ async function main() {
     JSON.stringify({
       "bashIde.shellcheckPath": process.env.SHELLCHECK,
       "editor.wordBasedSuggestions": "off",
+      "zsh.trace.server": "verbose",
     }),
   );
   await writeFile(
@@ -52,13 +53,15 @@ async function main() {
   );
   const cli = resolveCliPathFromVSCodeExecutablePath(vscodeExecutablePath);
   const launchArgs = [
+    "--log",
+    "trace",
     "--user-data-dir",
     path.join(directory, "user"),
     "--extensions-dir",
     path.join(directory, "extensions"),
   ];
   for (const extension of [
-    path.resolve("zsh-language-server-0.1.0.vsix"),
+    path.resolve(`${manifest.name}.vsix`),
     "mads-hartmann.bash-ide-vscode@1.43.2",
   ])
     execFileSync(cli, [...launchArgs, "--install-extension", extension], {
@@ -76,7 +79,7 @@ async function main() {
   const logs = path.join(directory, "user", "logs");
   for (const filename of await readdir(logs, { recursive: true })) {
     if (
-      filename.endsWith("-Zsh Language Server.log") ||
+      filename.endsWith("Zsh Language Server.log") ||
       filename.endsWith("Bash IDE.log")
     ) {
       assert.doesNotMatch(

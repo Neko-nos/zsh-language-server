@@ -75,8 +75,7 @@ func TestHoverCommentLayout(t *testing.T) {
 		}, newline)
 		d := doc(text)
 		hover := NewServer().hover(d, d.Position(strings.LastIndex(text, "paint_sample")))
-		want := "```zsh\npaint_sample() { :; }\n```\n\n" +
-			"Draw a dummy label.\n\n\n### Arguments\n\n" +
+		want := "```zsh\npaint_sample()\n```\n\nDraw a dummy label.\n\n\n### Arguments\n\n" +
 			"- `1`: Label, or `--` for the default.\n\n### Outputs\n\n" +
 			"Writes the `label` in **bold**.\n\n### Examples\n\n```zsh\npaint_sample 'dummy label'\n```"
 		if hover == nil || hover.Contents.Kind != "markdown" || hover.Contents.Value != want {

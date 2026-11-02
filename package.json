@@ -96,7 +96,7 @@
     "test": "go test -race ./... && node --test test/protocol.test.mjs",
     "audit:repo": "node scripts/audit-repo.mjs",
     "test:vscode": "node scripts/test-vscode.mjs",
-    "package": "node scripts/build.mjs --all && vsce package --no-dependencies --allow-missing-repository"
+    "package": "node scripts/build.mjs --all && vsce package --no-dependencies --allow-missing-repository --out zsh-language-server.vsix"
   },
   "dependencies": {
     "vscode-languageclient": "10.1.2"

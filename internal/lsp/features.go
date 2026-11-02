@@ -134,7 +134,7 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 	binding := d.binding(o)
 	documents := s.related(d)
 	for _, doc := range documents {
-		if doc != d && binding != 0 {
+		if doc != d && (binding != 0 || o.kind == "function" && o.functionRemovedAt > 0) {
 			continue
 		}
 		for _, candidate := range doc.occurrences {
@@ -144,11 +144,21 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 			if doc.binding(candidate) != binding {
 				continue
 			}
+			if o.kind == "function" && candidate.start < o.functionRemovedAt {
+				continue
+			}
+			// Direct calls run before later declarations; function bodies run when called.
+			if doc == d && o.kind == "function" && !o.declaration && !o.functionArgument && o.scope == 0 && candidate.start > o.start {
+				continue
+			}
 			result = append(result, declaration{doc, candidate})
 		}
 	}
 	if len(result) == 0 && o.kind == "function" {
 		for _, doc := range documents {
+			if doc != d && o.functionRemovedAt > 0 {
+				continue
+			}
 			context := o
 			if doc != d {
 				context.scope, context.start, context.fpath = 0, len(doc.Text), nil
@@ -158,6 +168,9 @@ func (s *Server) declarations(d *Document, o occurrence) []declaration {
 			}
 		}
 		if def := s.siblingDeclaration(d, o); def != nil {
+			return []declaration{*def}
+		}
+		if def := s.workspaceAutoloadDeclaration(d, o); def != nil {
 			return []declaration{*def}
 		}
 	}
@@ -185,35 +198,59 @@ func (s *Server) definitions(d *Document, pos Position) []Location {
 func (s *Server) hover(d *Document, pos Position) *Hover {
 	o := d.at(pos)
 	if o == nil {
-		return nil
+		return s.argumentHover(d, pos)
 	}
 	value := ""
 	if defs := s.declarations(d, *o); len(defs) > 0 {
 		def := defs[0]
-		lines := strings.Split(def.doc.Text, "\n")
-		line := def.whole.Start.Line
-		value = "```zsh\n" + strings.TrimSpace(lines[line]) + "\n```"
-		start := line
-		for start > 0 && strings.HasPrefix(strings.TrimSpace(lines[start-1]), "#") && !strings.HasPrefix(strings.TrimSpace(lines[start-1]), "#!") {
-			start--
+		if def.kind == "function" {
+			value = "```zsh\n" + def.name + "()\n```"
 		}
 		comments := []string{}
-		for _, comment := range lines[start:line] {
-			comment = strings.TrimSpace(comment)
-			if len(comment) > 1 && strings.Trim(comment, "#") == "" {
-				continue
-			}
-			comment = strings.TrimPrefix(strings.TrimPrefix(comment, "#"), " ")
-			comments = append(comments, comment)
+		if def.doc.tree != nil {
+			syntax.Walk(def.doc.tree, func(n syntax.Node) bool {
+				stmt, ok := n.(*syntax.Stmt)
+				if !ok || def.doc.Position(int(stmt.Pos().Offset())) != def.whole.Start {
+					return true
+				}
+				for _, comment := range stmt.Comments {
+					if comment.Pos().Offset() >= stmt.Pos().Offset() || strings.HasPrefix(comment.Text, "!") || comment.Text != "" && strings.Trim(comment.Text, "#") == "" {
+						continue
+					}
+					comments = append(comments, strings.TrimPrefix(comment.Text, " "))
+				}
+				return false
+			})
 		}
 		if len(comments) > 0 {
-			value += "\n\n" + commentMarkdown(comments)
+			if value != "" {
+				value += "\n\n"
+			}
+			value += commentMarkdown(comments)
+		} else if value == "" {
+			line := strings.Split(def.doc.Text, "\n")[def.whole.Start.Line]
+			value = "```zsh\n" + strings.TrimSpace(line) + "\n```"
 		}
 	} else if o.kind == "function" || o.kind == "builtin" || o.kind == "external" {
 		if help, ok := s.builtins[o.name]; ok && o.kind != "external" {
 			value = builtinDocumentation(help).Value
-		} else if o.kind != "builtin" {
+		} else if o.kind != "external" {
+			value = s.builtinHelp(o.name)
+		}
+		if value == "" && o.kind != "builtin" {
 			value = commandDocumentation(o.name)
+		}
+	}
+	if o.kind == "variable" {
+		help := s.shellDocumentation("zshparam", o.name)
+		if help == "" {
+			help = s.shellDocumentation("zshzle", "parameter:"+o.name)
+		}
+		if help != "" {
+			if value != "" {
+				value += "\n\n"
+			}
+			value += help
 		}
 	}
 	if value == "" {

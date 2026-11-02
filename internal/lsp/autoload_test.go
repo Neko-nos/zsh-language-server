@@ -309,3 +309,96 @@ func TestSiblingFunctionDefinitions(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceAutoloadDefinitions(t *testing.T) {
+	dir := t.TempDir()
+	library := filepath.Join(dir, "library")
+	scripts := filepath.Join(dir, "scripts")
+	for _, folder := range []string{library, scripts} {
+		if err := os.Mkdir(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range map[string]string{
+		"ask_sample":  "# Confirm a sample.\nask_sample() { print confirmed; }\n",
+		"body_sample": "# Render a sample.\nprint rendered\n",
+	} {
+		if err := os.WriteFile(filepath.Join(library, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text := "autoload -Uz ask_sample body_sample\nrun_sample() { ask_sample; body_sample; }\nrun_sample\n"
+	filename := filepath.Join(scripts, "session.zsh")
+	if err := os.WriteFile(filename, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command("zsh", "-dfc", `fpath=("$1"); source "$2"`, "zsh", library, filename).CombinedOutput()
+	if err != nil || string(output) != "confirmed\nrendered\n" {
+		t.Fatalf("inherited Zsh autoload path: %s (%v)", output, err)
+	}
+	s := NewServer()
+	s.roots = []string{dir}
+	d := Parse(TextDocument{URI: fileURI(filename), Text: text})
+	for name, description := range map[string]string{"ask_sample": "Confirm a sample.", "body_sample": "Render a sample."} {
+		for _, offset := range []int{strings.Index(text, name), strings.LastIndex(text, name)} {
+			position := d.Position(offset)
+			defs := s.definitions(d, position)
+			if len(defs) != 1 || defs[0].URI != fileURI(filepath.Join(library, name)) || defs[0].Range.Start.Line != 1 {
+				t.Fatalf("%s at %d: %+v", name, offset, defs)
+			}
+			if hover := s.hover(d, position); hover == nil || !strings.Contains(hover.Contents.Value, description) {
+				t.Fatalf("missing %q in hover: %+v", description, hover)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(scripts, "ask_sample"), []byte("ask_sample() { print other; }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	position := d.Position(strings.LastIndex(text, "ask_sample"))
+	if defs := s.definitions(d, position); len(defs) != 0 {
+		t.Fatalf("ambiguous workspace autoload: %+v", defs)
+	}
+	if hover := s.hover(d, position); hover != nil {
+		t.Fatalf("ambiguous workspace hover: %+v", hover)
+	}
+	d = Parse(TextDocument{URI: fileURI(filename), Text: "fpath=('" + library + "')\n" + text})
+	defs := s.definitions(d, d.Position(strings.LastIndex(d.Text, "ask_sample")))
+	if len(defs) != 1 || defs[0].URI != fileURI(filepath.Join(library, "ask_sample")) {
+		t.Fatalf("explicit fpath precedence: %+v", defs)
+	}
+	standalone := filepath.Join(dir, "standalone.zsh")
+	if err := os.WriteFile(standalone, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.roots = nil
+	d = Parse(TextDocument{URI: fileURI(standalone), Text: text})
+	defs = s.definitions(d, d.Position(strings.LastIndex(text, "body_sample")))
+	if len(defs) != 1 || defs[0].URI != fileURI(filepath.Join(library, "body_sample")) {
+		t.Fatalf("standalone script autoload: %+v", defs)
+	}
+}
+
+func TestInheritedAutoloadDocumentation(t *testing.T) {
+	library := filepath.Join(t.TempDir(), "sample library")
+	if err := os.Mkdir(library, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(library, "render_sample")
+	if err := os.WriteFile(target, []byte("# Render a sample.\n# Accepts a sample name.\n\nprint rendered\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FPATH", library)
+	text := "fpath=(/nonexistent/sample \"${fpath[@]}\")\nautoload -Uz render_sample\nrender_sample\n"
+	d := doc(text)
+	s := NewServer()
+	for _, offset := range []int{strings.Index(text, "render_sample"), strings.LastIndex(text, "render_sample")} {
+		position := d.Position(offset)
+		defs := s.definitions(d, position)
+		if len(defs) != 1 || defs[0].URI != fileURI(target) || defs[0].Range.Start.Line != 3 {
+			t.Fatalf("inherited autoload definition: %+v", defs)
+		}
+		if hover := s.hover(d, position); hover == nil || hover.Contents.Value != "```zsh\nrender_sample()\n```\n\nRender a sample.\nAccepts a sample name." {
+			t.Fatalf("missing AST-attached documentation: %+v", hover)
+		}
+	}
+}

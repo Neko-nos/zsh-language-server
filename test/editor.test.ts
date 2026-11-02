@@ -517,6 +517,91 @@ export async function runEditorTests(directory: string) {
       "# Paint a tile.\npaint_tile() { :; }\n",
     );
   }
+  const inherited = path.join(firstPath, "__ask_sample");
+  await fs.writeFile(
+    inherited,
+    "# Confirm a sample.\n\n__ask_sample() { :; }\n",
+  );
+  const bodyOnly = path.join(firstPath, "__render_sample");
+  await fs.writeFile(bodyOnly, "# Render a sample.\n\nprint sample\n");
+  await vscode.workspace.openTextDocument(await fs.realpath(bodyOnly));
+  await check(
+    "workspace-autoload",
+    "autoload -Uz __ask_sample __render_sample add-zsh-hook\nrun_sample() { __ask_sample; __render_sample; }\nadd-zsh-hook precmd run_sample\n",
+    async (document) => {
+      for (const [name, description] of [
+        ["__ask_sample", "Confirm a sample."],
+        ["__render_sample", "Render a sample."],
+        ["add-zsh-hook", "Add to HOOK the given FUNCTION."],
+      ]) {
+        for (const index of [
+          document.getText().indexOf(name),
+          document.getText().lastIndexOf(name),
+        ]) {
+          const position = document.positionAt(index + 2);
+          const locations = await vscode.commands.executeCommand<
+            vscode.Location[]
+          >("vscode.executeDefinitionProvider", document.uri, position);
+          assert.equal(locations?.length, 1, name);
+          assert.equal(path.basename(locations[0].uri.fsPath), name);
+          if (name !== "add-zsh-hook") {
+            assert.equal(
+              await fs.realpath(locations[0].uri.fsPath),
+              await fs.realpath(path.join(firstPath, name)),
+            );
+            assert.equal(locations[0].range.start.line, 2);
+          }
+          const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+            "vscode.executeHoverProvider",
+            document.uri,
+            position,
+          );
+          const markdown = hovers
+            ?.flatMap((hover) => hover.contents)
+            .map((content) =>
+              typeof content === "string" ? content : content.value,
+            )
+            .join("\n");
+          if (name !== "add-zsh-hook") {
+            assert.equal(
+              markdown,
+              `\`\`\`zsh\n${name}()\n\`\`\`\n\n${description}`,
+            );
+          } else {
+            assert.ok(
+              markdown?.startsWith(
+                `\`\`\`zsh\n${name}()\n\`\`\`\n\n${description}`,
+              ),
+            );
+          }
+          const editor = await vscode.window.showTextDocument(document);
+          editor.selection = new vscode.Selection(position, position);
+          await vscode.commands.executeCommand(
+            "editor.action.revealDefinition",
+          );
+          for (
+            let attempt = 0;
+            attempt < 200 &&
+            vscode.window.activeTextEditor?.document.languageId !== "zsh";
+            attempt++
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          const target = vscode.window.activeTextEditor;
+          assert.ok(target);
+          assert.equal(target.document.languageId, "zsh", name);
+          assert.equal(
+            await fs.realpath(target.document.uri.fsPath),
+            await fs.realpath(locations[0].uri.fsPath),
+          );
+          assert.equal(
+            target.selection.active.line,
+            locations[0].range.start.line,
+          );
+        }
+      }
+    },
+  );
   const loader = path.join(directory, "loader.zsh");
   await fs.writeFile(
     loader,
@@ -543,6 +628,35 @@ export async function runEditorTests(directory: string) {
         .map((part) => (typeof part === "string" ? part : part.value))
         .join("\n");
       assert.match(markdown ?? "", /Paint a tile/);
+    },
+  );
+  await check(
+    "builtin-setting-hover",
+    [
+      "setopt hist_ignore_all_dups",
+      "print $PATH",
+      "zstyle ':completion:*' matcher-list ''",
+      "bindkey '^X' forward-word",
+    ].join("\n"),
+    async (document) => {
+      for (const [word, description] of [
+        ["hist_ignore_all_dups", /older command is removed/],
+        ["PATH", /directories to search/],
+        ["matcher-list", /list of match specifications/],
+        ["forward-word", /beginning of the next word/],
+      ] as const) {
+        const hover = await vscode.commands.executeCommand<vscode.Hover[]>(
+          "vscode.executeHoverProvider",
+          document.uri,
+          at(document, word),
+        );
+        const markdown = hover
+          ?.flatMap((item) => item.contents)
+          .map((part) => (typeof part === "string" ? part : part.value))
+          .join("\n");
+        assert.match(markdown ?? "", description, word);
+        assert.ok(hover?.some((item) => document.getText(item.range) === word));
+      }
     },
   );
   await check(
