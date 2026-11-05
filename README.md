@@ -11,7 +11,16 @@ npm ci
 npm run package
 ```
 
-In VS Code, run **Extensions: Install from VSIX…** and select `zsh-language-server.vsix`. Build and install it again to update.
+In VS Code, run **Extensions: Install from VSIX…** and select `zsh-language-server.vsix`.
+
+### Automatic updates after pulling
+
+Enable automatic updates once in this checkout:
+
+```sh
+git config --local hook.update-extension.command ./scripts/update-extension.sh
+git config --local hook.update-extension.event post-merge
+```
 
 ## Use
 
